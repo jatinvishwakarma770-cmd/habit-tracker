@@ -1,3 +1,4 @@
+
 const mongoose = require("mongoose");
 
 const habitSchema = new mongoose.Schema(
@@ -38,12 +39,7 @@ const habitSchema = new mongoose.Schema(
 
     frequency: {
       type: String,
-      enum: [
-        "Daily",
-        "Weekdays",
-        "Weekends",
-        "Custom",
-      ],
+      enum: ["Daily", "Weekdays", "Weekends", "Custom"],
       default: "Daily",
     },
 
@@ -62,9 +58,19 @@ const habitSchema = new mongoose.Schema(
       default: [],
     },
 
+    missedDates: {
+      type: [String],
+      default: [],
+    },
+
     archived: {
       type: Boolean,
       default: false,
+    },
+
+    missedTrackingThroughDate: {
+      type: String,
+      default: null,
     },
   },
   {

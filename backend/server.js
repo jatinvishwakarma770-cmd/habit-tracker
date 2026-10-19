@@ -1,20 +1,5 @@
 
-// =====================================================
-// LOAD ENVIRONMENT VARIABLES FIRST
-// =====================================================
-
 require("dotenv").config();
-
-// =====================================================
-// DNS FIX FOR MONGODB SRV
-// =====================================================
-
-const dns = require("dns");
-
-dns.setServers([
-  "8.8.8.8",
-  "1.1.1.1",
-]);
 
 // =====================================================
 // IMPORTS
@@ -25,47 +10,58 @@ const cors = require("cors");
 const mongoose = require("mongoose");
 const OpenAI = require("openai");
 
-// =====================================================
-// ROUTES
-// =====================================================
-
 const authRoutes = require("./routes/auth");
 const habitRoutes = require("./routes/habits");
+const mlRoutes = require("./routes/ml");
 
 // =====================================================
-// APP
+// APP INITIALIZATION
 // =====================================================
 
 const app = express();
-
-const PORT = process.env.PORT || 5000;
+const PORT = Number(process.env.PORT) || 5000;
 
 // =====================================================
-// BASIC ENV CHECK
+// ENVIRONMENT CHECK
 // =====================================================
 
 console.log("=================================");
-console.log("ENV CHECK");
-console.log("PORT:", process.env.PORT);
+console.log("HABIT TRACKER BACKEND");
+console.log("=================================");
+console.log("PORT:", PORT);
 console.log(
   "MONGODB_URI:",
-  process.env.MONGODB_URI
-    ? "FOUND"
-    : "MISSING"
+  process.env.MONGODB_URI ? "FOUND" : "MISSING"
 );
 console.log(
   "JWT_SECRET:",
-  process.env.JWT_SECRET
-    ? "FOUND"
-    : "MISSING"
+  process.env.JWT_SECRET ? "FOUND" : "MISSING"
 );
 console.log(
   "OPENAI_API_KEY:",
-  process.env.OPENAI_API_KEY
-    ? "FOUND"
-    : "MISSING"
+  process.env.OPENAI_API_KEY ? "FOUND" : "MISSING"
 );
 console.log("=================================");
+
+// =====================================================
+// MONGODB CONNECTION DIAGNOSTICS
+// =====================================================
+
+mongoose.connection.on("connected", () => {
+  console.log("MongoDB connection established");
+});
+
+mongoose.connection.on("disconnected", () => {
+  console.error("MongoDB disconnected");
+});
+
+mongoose.connection.on("reconnected", () => {
+  console.log("MongoDB reconnected successfully");
+});
+
+mongoose.connection.on("error", (error) => {
+  console.error("MongoDB connection event:", error.message);
+});
 
 // =====================================================
 // MIDDLEWARE
@@ -78,39 +74,54 @@ app.use(
   })
 );
 
-app.use(express.json());
+app.use(express.json({ limit: "1mb" }));
 
-app.use(express.urlencoded({
-  extended: true,
-}));
+app.use(
+  express.urlencoded({
+    extended: true,
+    limit: "1mb",
+  })
+);
 
 // =====================================================
 // REQUEST LOGGER
 // =====================================================
 
 app.use((req, res, next) => {
-  console.log(
-    `REQUEST: ${req.method} ${req.originalUrl}`
-  );
-
+  console.log(`REQUEST: ${req.method} ${req.originalUrl}`);
   next();
 });
+
+// =====================================================
+// OPENAI INITIALIZATION
+// =====================================================
+
+let openai = null;
+
+if (
+  process.env.OPENAI_API_KEY &&
+  process.env.OPENAI_API_KEY !== "your_openai_key_here"
+) {
+  openai = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+  });
+
+  console.log("OpenAI client initialized");
+} else {
+  console.log("OpenAI API key not configured");
+}
 
 // =====================================================
 // ROUTES
 // =====================================================
 
-// Authentication
-app.use(
-  "/api/auth",
-  authRoutes
-);
+app.use("/api/auth", authRoutes);
+app.use("/api/habits", habitRoutes);
+app.use("/api/ml", mlRoutes);
+app.use("/api/daily-analysis", require("./routes/dailyAnalysis"));
+app.use(express.json());
 
-// Habits
-app.use(
-  "/api/habits",
-  habitRoutes
-);
+app.use("/api/ai", require("./routes/ai"));
 
 // =====================================================
 // HOME
@@ -119,8 +130,7 @@ app.use(
 app.get("/", (req, res) => {
   res.json({
     success: true,
-    message:
-      "Habit Tracker Backend is running 🚀",
+    message: "Habit Tracker Backend is running",
   });
 });
 
@@ -128,302 +138,120 @@ app.get("/", (req, res) => {
 // HEALTH CHECK
 // =====================================================
 
-app.get(
-  "/api/health",
-  (req, res) => {
+app.get("/api/health", (req, res) => {
+  const state = mongoose.connection.readyState;
 
-    res.json({
-      success: true,
+  const stateNames = {
+    0: "disconnected",
+    1: "connected",
+    2: "connecting",
+    3: "disconnecting",
+  };
 
-      message:
-        "Server is healthy",
-
-      mongodb:
-        mongoose.connection.readyState === 1
-          ? "connected"
-          : "disconnected",
-
-      databaseState:
-        mongoose.connection.readyState,
-    });
-  }
-);
+  res.status(state === 1 ? 200 : 503).json({
+    success: state === 1,
+    server: "running",
+    mongodb: stateNames[state] || "unknown",
+    database:
+      state === 1 ? mongoose.connection.name : null,
+  });
+});
 
 // =====================================================
 // TEST POST
 // =====================================================
 
-app.post(
-  "/test-post",
-  (req, res) => {
+app.post("/test-post", (req, res) => {
+  console.log("POST TEST RECEIVED");
+  console.log("BODY:", req.body);
 
-    console.log(
-      "POST TEST RECEIVED"
-    );
-
-    console.log(
-      "BODY:",
-      req.body
-    );
-
-    res.json({
-      success: true,
-      message:
-        "POST is working",
-      body: req.body,
-    });
-  }
-);
-
-// =====================================================
-// OPENAI
-// =====================================================
-
-let openai = null;
-
-if (
-  process.env.OPENAI_API_KEY &&
-  process.env.OPENAI_API_KEY !==
-    "your_openai_key_here"
-) {
-
-  openai = new OpenAI({
-    apiKey:
-      process.env.OPENAI_API_KEY,
+  res.json({
+    success: true,
+    message: "POST is working",
+    body: req.body,
   });
-
-  console.log(
-    "OpenAI client initialized ✅"
-  );
-
-} else {
-
-  console.log(
-    "OpenAI API key not configured ⚠️"
-  );
-}
-
-// =====================================================
-// MONGODB CONNECTION
-// =====================================================
-
-const connectDB = async () => {
-
-  try {
-
-    if (!process.env.MONGODB_URI) {
-
-      throw new Error(
-        "MONGODB_URI is missing from .env"
-      );
-    }
-
-    if (!process.env.JWT_SECRET) {
-
-      throw new Error(
-        "JWT_SECRET is missing from .env"
-      );
-    }
-
-    console.log(
-      "Connecting to MongoDB..."
-    );
-
-    await mongoose.connect(
-      process.env.MONGODB_URI,
-      {
-        serverSelectionTimeoutMS: 15000,
-      }
-    );
-
-    console.log(
-      "MongoDB Connected Successfully ✅"
-    );
-
-    console.log(
-      "Database:",
-      mongoose.connection.name
-    );
-
-  } catch (error) {
-
-    console.error(
-      "================================="
-    );
-
-    console.error(
-      "MongoDB Connection Error ❌"
-    );
-
-    console.error(
-      error.message
-    );
-
-    console.error(
-      "================================="
-    );
-
-    throw error;
-  }
-};
+});
 
 // =====================================================
 // AI CHAT
 // =====================================================
 
-app.post(
-  "/api/ai/chat",
-  async (req, res) => {
+app.post("/api/ai/chat", async (req, res) => {
+  try {
+    if (!openai) {
+      return res.status(503).json({
+        success: false,
+        message: "OpenAI API key is not configured",
+      });
+    }
 
-    try {
+    const { message, habits = [] } = req.body;
 
-      if (!openai) {
+    if (
+      typeof message !== "string" ||
+      !message.trim()
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Message is required",
+      });
+    }
 
-        return res.status(503).json({
-          success: false,
-          message:
-            "OpenAI API key is not configured",
-        });
-      }
+    if (!Array.isArray(habits)) {
+      return res.status(400).json({
+        success: false,
+        message: "Habits must be an array",
+      });
+    }
 
-      const {
-        message,
-        habits = [],
-      } = req.body;
+    const now = new Date();
 
-      // -----------------------------------------------
-      // VALIDATION
-      // -----------------------------------------------
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const day = String(now.getDate()).padStart(2, "0");
 
-      if (
-        !message ||
-        typeof message !== "string" ||
-        !message.trim()
-      ) {
+    const today = `${year}-${month}-${day}`;
 
-        return res.status(400).json({
-          success: false,
-          message:
-            "Message is required",
-        });
-      }
+    const habitInformation = habits
+      .map((habit) => {
+        const completedDates = Array.isArray(habit.completedDates)
+          ? habit.completedDates
+          : [];
 
-      // -----------------------------------------------
-      // TODAY
-      // -----------------------------------------------
+        const completedToday = completedDates.includes(today);
 
-      const now =
-        new Date();
-
-      const year =
-        now.getFullYear();
-
-      const month =
-        String(
-          now.getMonth() + 1
-        ).padStart(2, "0");
-
-      const day =
-        String(
-          now.getDate()
-        ).padStart(2, "0");
-
-      const today =
-        `${year}-${month}-${day}`;
-
-      // -----------------------------------------------
-      // HABIT INFORMATION
-      // -----------------------------------------------
-
-      let totalCompletedDays = 0;
-
-      const habitInformation =
-        Array.isArray(habits)
-          ? habits
-              .map((habit) => {
-
-                const completedDates =
-                  Array.isArray(
-                    habit.completedDates
-                  )
-                    ? habit.completedDates
-                    : [];
-
-                const completedToday =
-                  completedDates.includes(
-                    today
-                  );
-
-                totalCompletedDays +=
-                  completedDates.length;
-
-                return `
-Habit: ${habit.name || "Unknown"}
-
-Completed today: ${
-                  completedToday
-                    ? "Yes"
-                    : "No"
-                }
-
-Total completed days: ${
-                  completedDates.length
-                }
-
-Completed dates:
-${
-  completedDates.join(", ") ||
-  "None"
-}
+        return `
+Habit: ${habit.name || habit.title || "Unknown"}
+Category: ${habit.category || "Unspecified"}
+Frequency: ${habit.frequency || "Unspecified"}
+Completed today: ${completedToday ? "Yes" : "No"}
+Total completed days: ${completedDates.length}
+Completed dates: ${completedDates.join(", ") || "None"}
 `;
-              })
-              .join("\n")
-          : "No habits available.";
+      })
+      .join("\n");
 
-      // -----------------------------------------------
-      // STATISTICS
-      // -----------------------------------------------
+    const completedTodayCount = habits.filter((habit) => {
+      const dates = Array.isArray(habit.completedDates)
+        ? habit.completedDates
+        : [];
 
-      const totalHabits =
-        Array.isArray(habits)
-          ? habits.length
-          : 0;
+      return dates.includes(today);
+    }).length;
 
-      const completedTodayCount =
-        Array.isArray(habits)
-          ? habits.filter(
-              (habit) => {
+    const completionRate = habits.length
+      ? Math.round((completedTodayCount / habits.length) * 100)
+      : 0;
 
-                const dates =
-                  Array.isArray(
-                    habit.completedDates
-                  )
-                    ? habit.completedDates
-                    : [];
+    const totalCompletedDays = habits.reduce((total, habit) => {
+      const dates = Array.isArray(habit.completedDates)
+        ? habit.completedDates
+        : [];
 
-                return dates.includes(
-                  today
-                );
-              }
-            ).length
-          : 0;
+      return total + dates.length;
+    }, 0);
 
-      const completionRate =
-        totalHabits === 0
-          ? 0
-          : Math.round(
-              (
-                completedTodayCount /
-                totalHabits
-              ) *
-              100
-            );
-
-      // -----------------------------------------------
-      // PROMPT
-      // -----------------------------------------------
-
-      const prompt = `
+    const prompt = `
 You are an AI Habit Coach inside a habit tracking application.
 
 Be supportive, practical, concise and personalized.
@@ -432,30 +260,19 @@ TODAY:
 ${today}
 
 USER STATISTICS:
-
-Total habits:
-${totalHabits}
-
-Completed today:
-${completedTodayCount}/${totalHabits}
-
-Today's completion rate:
-${completionRate}%
-
-Total completed habit days:
-${totalCompletedDays}
+Total habits: ${habits.length}
+Completed today: ${completedTodayCount}/${habits.length}
+Today's completion rate: ${completionRate}%
+Total recorded completed habit days: ${totalCompletedDays}
 
 HABIT INFORMATION:
-
-${habitInformation}
+${habitInformation || "No habits available."}
 
 USER QUESTION:
-
 ${message.trim()}
 
 RULES:
-
-1. Use the user's actual habit data when relevant.
+1. Use the provided habit data when relevant.
 2. Do not invent statistics.
 3. Give practical advice.
 4. Encourage consistency rather than perfection.
@@ -465,174 +282,126 @@ RULES:
 8. Use emojis occasionally.
 `;
 
-      // -----------------------------------------------
-      // OPENAI REQUEST
-      // -----------------------------------------------
+    const response = await openai.responses.create({
+      model: "gpt-5.6-luna",
+      input: prompt,
+    });
 
-      const response =
-        await openai.responses.create({
+    return res.json({
+      success: true,
+      reply:
+        response.output_text ||
+        "I could not generate a response.",
+    });
+  } catch (error) {
+    console.error("AI CHAT ERROR:", error.message);
 
-          model:
-            "gpt-5.6-luna",
-
-          input:
-            prompt,
-        });
-
-      // -----------------------------------------------
-      // RESPONSE
-      // -----------------------------------------------
-
-      return res.json({
-
-        success: true,
-
-        reply:
-          response.output_text ||
-          "I could not generate a response.",
-      });
-
-    } catch (error) {
-
-      console.error(
-        "================================="
-      );
-
-      console.error(
-        "AI ERROR:"
-      );
-
-      console.error(
-        error
-      );
-
-      console.error(
-        "================================="
-      );
-
-      return res.status(500).json({
-
-        success: false,
-
-        message:
-          "AI request failed",
-
-        error:
-          error.message,
-      });
-    }
+    return res.status(500).json({
+      success: false,
+      message: "AI request failed",
+      error: error.message,
+    });
   }
-);
+});
 
 // =====================================================
 // 404 HANDLER
 // =====================================================
 
-app.use(
-  (req, res) => {
+app.use((req, res) => {
+  console.log("404 ROUTE:", req.originalUrl);
 
-    console.log(
-      "404 ROUTE:",
-      req.originalUrl
-    );
-
-    res.status(404).json({
-
-      success: false,
-
-      message:
-        "Route not found",
-
-      path:
-        req.originalUrl,
-    });
-  }
-);
+  res.status(404).json({
+    success: false,
+    message: "Route not found",
+    path: req.originalUrl,
+  });
+});
 
 // =====================================================
 // GLOBAL ERROR HANDLER
 // =====================================================
 
-app.use(
-  (error, req, res, next) => {
+app.use((error, req, res, next) => {
+  console.error("GLOBAL ERROR:", error.message);
 
-    console.error(
-      "GLOBAL ERROR:",
-      error
-    );
-
-    res.status(500).json({
-
-      success: false,
-
-      message:
-        "Internal server error",
-
-      error:
-        error.message,
-    });
+  if (res.headersSent) {
+    return next(error);
   }
-);
+
+  res.status(500).json({
+    success: false,
+    message: "Internal server error",
+  });
+});
+
+// =====================================================
+// MONGODB CONNECTION
+// =====================================================
+
+async function connectDB() {
+  if (!process.env.MONGODB_URI) {
+    throw new Error("MONGODB_URI is missing from .env");
+  }
+
+  if (!process.env.JWT_SECRET) {
+    throw new Error("JWT_SECRET is missing from .env");
+  }
+
+  console.log("Connecting to MongoDB Atlas...");
+
+  try {
+    await mongoose.connect(process.env.MONGODB_URI, {
+      serverSelectionTimeoutMS: 20000,
+      connectTimeoutMS: 10000,
+    });
+
+    console.log("MongoDB connected successfully");
+    console.log("Database:", mongoose.connection.name);
+    console.log("Connection state:", mongoose.connection.readyState);
+  } catch (error) {
+    console.error("MongoDB connection failed");
+    console.error("Error name:", error.name);
+    console.error("Error message:", error.message);
+
+    if (error.reason?.servers) {
+      for (const [address, server] of error.reason.servers) {
+        console.error("Server:", address);
+        console.error("Server type:", server.type);
+        console.error(
+          "Server error:",
+          server.error?.message || "No additional server error"
+        );
+      }
+    }
+
+    throw error;
+  }
+}
 
 // =====================================================
 // START SERVER
 // =====================================================
 
-const startServer =
-  async () => {
+async function startServer() {
+  try {
+    await connectDB();
 
-    try {
-
-      await connectDB();
-
-      app.listen(
-        PORT,
-        "0.0.0.0",
-        () => {
-
-          console.log(
-            "================================="
-          );
-
-          console.log(
-            "Habit Tracker Backend Started 🚀"
-          );
-
-          console.log(
-            `Server: http://localhost:${PORT}`
-          );
-
-          console.log(
-            `Mobile/API: http://192.168.1.72:${PORT}`
-          );
-
-          console.log(
-            `Auth API: http://localhost:${PORT}/api/auth`
-          );
-
-          console.log(
-            `Habit API: http://localhost:${PORT}/api/habits`
-          );
-
-          console.log(
-            `Health: http://localhost:${PORT}/api/health`
-          );
-
-          console.log(
-            "================================="
-          );
-        }
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log("=================================");
+      console.log("Habit Tracker Backend Started");
+      console.log(`Local API: http://localhost:${PORT}`);
+      console.log(`Health: http://localhost:${PORT}/api/health`);
+      console.log(
+        `ML API: http://localhost:${PORT}/api/ml/predict-completion`
       );
-
-    } catch (error) {
-
-      console.error(
-        "SERVER START FAILED ❌"
-      );
-
-      process.exit(1);
-    }
-  };
+      console.log("=================================");
+    });
+  } catch (error) {
+    console.error("SERVER START FAILED");
+    console.error(error.message);
+    process.exitCode = 1;
+  }
+}
 
 startServer();
-
