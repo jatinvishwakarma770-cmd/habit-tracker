@@ -6,6 +6,7 @@ const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
 
 const Habit = require("../models/Habit");
+const { FEATURES, buildTrainingData } = require("../ml/sharedData");
 
 const {
   predictHabit,
@@ -255,6 +256,101 @@ router.post("/evaluate-logistic", protect, async (req, res) => {
     });
   }
 });
+
+
+
+/**
+ * EXPORT TRAINING DATASET
+ * GET /api/ml/export-training-dataset
+ *
+ * Exports training rows for the authenticated user's active habits.
+ * Uses the existing MongoDB connection and shared ML pipeline.
+ */
+router.get("/export-training-dataset", protect, async (req, res) => {
+  try {
+    const habits = await loadUserHabits(req.userId);
+    const rows = buildTrainingData(habits);
+
+    const headers = [
+      "targetDate",
+      "habitId",
+      ...FEATURES,
+      "label",
+      "outcome",
+    ];
+
+    // Escape CSV values safely, including commas and quotation marks.
+    const escapeCSV = (value) => {
+      if (value === null || value === undefined) return "";
+
+      const text = String(value);
+      return `"${text.replace(/"/g, '""')}"`;
+    };
+
+    const csvRows = rows.map((row) => {
+      const featureValues = FEATURES.map((feature, index) => {
+        if (
+          row.featureObject &&
+          Object.prototype.hasOwnProperty.call(row.featureObject, feature)
+        ) {
+          return row.featureObject[feature];
+        }
+
+        if (Array.isArray(row.features)) {
+          return row.features[index];
+        }
+
+        if (
+          row.features &&
+          typeof row.features === "object" &&
+          Object.prototype.hasOwnProperty.call(row.features, feature)
+        ) {
+          return row.features[feature];
+        }
+
+        return "";
+      });
+
+      const label = Number(row.label);
+
+      return [
+        row.targetDate ?? "",
+        row.habitId ?? "",
+        ...featureValues,
+        row.label ?? "",
+        label === 1 ? "completed" : label === 0 ? "missed" : "unknown",
+      ];
+    });
+
+    const csv = [
+      headers,
+      ...csvRows,
+    ]
+      .map((row) => row.map(escapeCSV).join(","))
+      .join("\r\n");
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader(
+      "Content-Disposition",
+      'attachment; filename="habit_training_dataset.csv"'
+    );
+    res.setHeader("Cache-Control", "no-store");
+
+    // BOM helps spreadsheet applications recognize UTF-8.
+    return res.status(200).send("\uFEFF" + csv);
+  } catch (error) {
+    console.error(
+      "TRAINING DATASET EXPORT ERROR:",
+      error.stack || error.message
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: "Could not export the training dataset.",
+    });
+  }
+});
+
 
 // =====================================================
 // EXPORT ROUTER
