@@ -59,7 +59,7 @@ function protect(req, res, next) {
     }
 
     req.userId = decoded.userId;
-    next();
+    return next();
   } catch (error) {
     console.error("ML AUTHENTICATION ERROR:", error.message);
 
@@ -257,15 +257,11 @@ router.post("/evaluate-logistic", protect, async (req, res) => {
   }
 });
 
+// =====================================================
+// EXPORT TRAINING DATASET
+// GET /api/ml/export-training-dataset
+// =====================================================
 
-
-/**
- * EXPORT TRAINING DATASET
- * GET /api/ml/export-training-dataset
- *
- * Exports training rows for the authenticated user's active habits.
- * Uses the existing MongoDB connection and shared ML pipeline.
- */
 router.get("/export-training-dataset", protect, async (req, res) => {
   try {
     const habits = await loadUserHabits(req.userId);
@@ -279,12 +275,11 @@ router.get("/export-training-dataset", protect, async (req, res) => {
       "outcome",
     ];
 
-    // Escape CSV values safely, including commas and quotation marks.
     const escapeCSV = (value) => {
       if (value === null || value === undefined) return "";
 
-      const text = String(value);
-      return `"${text.replace(/"/g, '""')}"`;
+      const valueText = String(value);
+      return `"${valueText.replace(/"/g, '""')}"`;
     };
 
     const csvRows = rows.map((row) => {
@@ -318,14 +313,15 @@ router.get("/export-training-dataset", protect, async (req, res) => {
         row.habitId ?? "",
         ...featureValues,
         row.label ?? "",
-        label === 1 ? "completed" : label === 0 ? "missed" : "unknown",
+        label === 1
+          ? "completed"
+          : label === 0
+            ? "missed"
+            : "unknown",
       ];
     });
 
-    const csv = [
-      headers,
-      ...csvRows,
-    ]
+    const csv = [headers, ...csvRows]
       .map((row) => row.map(escapeCSV).join(","))
       .join("\r\n");
 
@@ -336,7 +332,6 @@ router.get("/export-training-dataset", protect, async (req, res) => {
     );
     res.setHeader("Cache-Control", "no-store");
 
-    // BOM helps spreadsheet applications recognize UTF-8.
     return res.status(200).send("\uFEFF" + csv);
   } catch (error) {
     console.error(
@@ -350,7 +345,6 @@ router.get("/export-training-dataset", protect, async (req, res) => {
     });
   }
 });
-
 
 // =====================================================
 // EXPORT ROUTER
