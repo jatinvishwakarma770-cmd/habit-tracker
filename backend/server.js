@@ -88,7 +88,11 @@ app.use(
 // =====================================================
 
 app.use((req, res, next) => {
-  console.log(`REQUEST: ${req.method} ${req.originalUrl}`);
+  console.log("========== INCOMING REQUEST ==========");
+  console.log("METHOD:", req.method);
+  console.log("URL:", req.originalUrl);
+  console.log("BODY:", req.body);
+  console.log("======================================");
   next();
 });
 

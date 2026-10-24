@@ -51,7 +51,7 @@ const protect = (req, res, next) => {
 };
 
 // --------------------------------------------------
-// Constants and helpers
+// Constants
 // --------------------------------------------------
 
 const VALID_CATEGORIES = [
@@ -91,6 +91,11 @@ const SHORT_DAY_NAMES = [
 ];
 
 const MAX_DATES_PER_RUN = 90;
+const DEFAULT_TIMEZONE = "Asia/Kolkata";
+
+// --------------------------------------------------
+// Date and timezone helpers
+// --------------------------------------------------
 
 function isValidObjectId(id) {
   return mongoose.Types.ObjectId.isValid(id);
@@ -154,32 +159,73 @@ function dateKeyInTimeZone(date, timeZone) {
   return `${values.year}-${values.month}-${values.day}`;
 }
 
+/**
+ * Gets today's date in the supplied timezone.
+ * Defaults to Asia/Kolkata when timezone is missing.
+ */
 function getLocalDateForRequest(req) {
-  const timezone = req.body?.timezone;
+  const body =
+    req.body && typeof req.body === "object"
+      ? req.body
+      : {};
 
-  if (
-    typeof timezone !== "string" ||
-    !timezone.trim() ||
-    timezone.length > 100
-  ) {
+  const suppliedTimezone = body.timezone;
+
+  const timezone =
+    typeof suppliedTimezone === "string" &&
+    suppliedTimezone.trim().length > 0
+      ? suppliedTimezone.trim()
+      : DEFAULT_TIMEZONE;
+
+  // Diagnostic logging: never log tokens or authorization headers.
+  console.log("TIMEZONE DEBUG:", {
+    method: req.method,
+    path: req.originalUrl,
+    bodyType: typeof req.body,
+    timezone,
+    contentType: req.headers["content-type"],
+  });
+
+  if (timezone.length > 100) {
     return {
-      error:
-        "A valid IANA timezone is required, for example Asia/Kolkata.",
+      error: "Timezone is too long.",
     };
   }
 
   try {
+    // Throws if the timezone is invalid.
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+    });
+
     const today = dateKeyInTimeZone(new Date(), timezone);
 
     if (!isValidDateKey(today)) {
-      return { error: "Could not determine the local date." };
+      return {
+        error: "Could not determine the local date.",
+      };
     }
 
-    return { today, timezone };
-  } catch {
-    return { error: "Invalid timezone." };
+    return {
+      today,
+      timezone,
+    };
+  } catch (error) {
+    console.error("TIMEZONE VALIDATION FAILED:", {
+      timezone,
+      error: error.message,
+    });
+
+    return {
+      error:
+        "Invalid timezone. Use a valid IANA timezone, for example Asia/Kolkata.",
+    };
   }
 }
+
+// --------------------------------------------------
+// Schedule helpers
+// --------------------------------------------------
 
 function isScheduledForDate(habit, dateKey) {
   const weekday = weekdayForDateKey(dateKey);
@@ -214,6 +260,10 @@ function isScheduledForDate(habit, dateKey) {
       return false;
   }
 }
+
+// --------------------------------------------------
+// Habit validation and payload helpers
+// --------------------------------------------------
 
 function validateHabitInput(body, { partial = false } = {}) {
   const errors = [];
@@ -264,7 +314,7 @@ function validateHabitInput(body, { partial = false } = {}) {
 
   if (
     body.frequency === "Custom" &&
-    body.customDays !== undefined &&
+    Array.isArray(body.customDays) &&
     body.customDays.length === 0
   ) {
     errors.push("Select at least one day for a custom schedule.");
@@ -273,8 +323,10 @@ function validateHabitInput(body, { partial = false } = {}) {
   if (body.reminderTime !== undefined) {
     if (
       body.reminderTime !== null &&
-      (typeof body.reminderTime !== "string" ||
-        !/^([01]\d|2[0-3]):[0-5]\d$/.test(body.reminderTime))
+      (
+        typeof body.reminderTime !== "string" ||
+        !/^([01]\d|2[0-3]):[0-5]\d$/.test(body.reminderTime)
+      )
     ) {
       errors.push("reminderTime must use HH:mm format or null.");
     }
@@ -340,10 +392,8 @@ function sendServerError(res, message, error) {
 
 // --------------------------------------------------
 // POST /api/habits/reconcile-missed
-//
-// Record past scheduled dates that were neither completed
-// nor already marked missed. The current day is never
-// automatically marked missed.
+// Record past scheduled dates that were neither
+// completed nor already marked missed.
 // --------------------------------------------------
 
 router.post("/reconcile-missed", protect, async (req, res) => {
@@ -370,7 +420,6 @@ router.post("/reconcile-missed", protect, async (req, res) => {
     let updatedHabits = 0;
 
     for (const habit of habits) {
-      // Avoid processing dates before the habit was created.
       const createdDate = dateKeyInTimeZone(
         habit.createdAt || new Date(),
         timezone
@@ -380,7 +429,6 @@ router.post("/reconcile-missed", protect, async (req, res) => {
         ? addDays(habit.missedTrackingThroughDate, 1)
         : createdDate;
 
-      // A cursor must never move backwards.
       if (nextDate < createdDate) {
         nextDate = createdDate;
       }
@@ -391,7 +439,7 @@ router.post("/reconcile-missed", protect, async (req, res) => {
 
       const completed = new Set(habit.completedDates || []);
       const missed = new Set(habit.missedDates || []);
-      let habitChanged = false;
+
       let daysThisRun = 0;
       let lastProcessedDate = null;
 
@@ -406,7 +454,6 @@ router.post("/reconcile-missed", protect, async (req, res) => {
         ) {
           missed.add(nextDate);
           newlyMissed++;
-          habitChanged = true;
         }
 
         lastProcessedDate = nextDate;
@@ -419,10 +466,6 @@ router.post("/reconcile-missed", protect, async (req, res) => {
         habit.missedDates = Array.from(missed).sort();
         habit.missedTrackingThroughDate = lastProcessedDate;
 
-        await habit.save();
-        updatedHabits++;
-      } else if (habitChanged) {
-        habit.missedDates = Array.from(missed).sort();
         await habit.save();
         updatedHabits++;
       }
@@ -451,7 +494,7 @@ router.post("/reconcile-missed", protect, async (req, res) => {
 // --------------------------------------------------
 // GET /api/habits/all
 // Return active and archived habits.
-// This route must be above /:id.
+// Keep this before /:id.
 // --------------------------------------------------
 
 router.get("/all", protect, async (req, res) => {
@@ -543,8 +586,7 @@ router.post("/", protect, async (req, res) => {
 
 // --------------------------------------------------
 // PATCH /api/habits/:id/toggle
-// Toggle completion for the user's local current date.
-// Requires { timezone: "Asia/Kolkata" }.
+// Toggle completion for today's local date.
 // --------------------------------------------------
 
 router.patch("/:id/toggle", protect, async (req, res) => {
@@ -606,8 +648,6 @@ router.patch("/:id/toggle", protect, async (req, res) => {
 
 // --------------------------------------------------
 // POST /api/habits/:id/mark-missed
-// Manually mark a date missed.
-// Requires { date: "YYYY-MM-DD", timezone: "Asia/Kolkata" }.
 // --------------------------------------------------
 
 router.post("/:id/mark-missed", protect, async (req, res) => {
@@ -684,8 +724,8 @@ router.post("/:id/mark-missed", protect, async (req, res) => {
 });
 
 // --------------------------------------------------
-// PATCH /api/habits/:id/archive
-// POST /api/habits/:id/archive
+// Archive habit
+// PATCH or POST /api/habits/:id/archive
 // --------------------------------------------------
 
 async function archiveHabit(req, res) {
@@ -716,8 +756,8 @@ router.patch("/:id/archive", protect, archiveHabit);
 router.post("/:id/archive", protect, archiveHabit);
 
 // --------------------------------------------------
-// PATCH /api/habits/:id/unarchive
-// POST /api/habits/:id/unarchive
+// Unarchive habit
+// PATCH or POST /api/habits/:id/unarchive
 // --------------------------------------------------
 
 async function unarchiveHabit(req, res) {
@@ -749,19 +789,31 @@ router.post("/:id/unarchive", protect, unarchiveHabit);
 
 // --------------------------------------------------
 // PATCH /api/habits/:id/reminder
-// Update only the reminder time.
+// Update reminder time.
 // --------------------------------------------------
 
 router.patch("/:id/reminder", protect, async (req, res) => {
   try {
-    const errors = validateHabitInput({
-      reminderTime: req.body?.reminderTime,
-    }, { partial: true });
+    const body = req.body || {};
+
+    const errors = validateHabitInput(
+      {
+        reminderTime: body.reminderTime,
+      },
+      { partial: true }
+    );
 
     if (errors.length > 0) {
       return res.status(400).json({
         success: false,
         message: errors[0],
+      });
+    }
+
+    if (body.reminderTime === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: "reminderTime is required.",
       });
     }
 
@@ -774,7 +826,7 @@ router.patch("/:id/reminder", protect, async (req, res) => {
       });
     }
 
-    habit.reminderTime = req.body.reminderTime;
+    habit.reminderTime = body.reminderTime;
     await habit.save();
 
     return res.status(200).json({
@@ -788,9 +840,8 @@ router.patch("/:id/reminder", protect, async (req, res) => {
 });
 
 // --------------------------------------------------
-// PATCH /api/habits/:id
-// PUT /api/habits/:id
-// Update habit details.
+// Update habit details
+// PATCH or PUT /api/habits/:id
 // --------------------------------------------------
 
 async function updateHabit(req, res) {
@@ -817,6 +868,7 @@ async function updateHabit(req, res) {
 
     const updates = habitPayload(body, { partial: true });
     const nextFrequency = updates.frequency || habit.frequency;
+
     const nextCustomDays =
       updates.customDays !== undefined
         ? updates.customDays
@@ -850,7 +902,6 @@ router.put("/:id", protect, updateHabit);
 
 // --------------------------------------------------
 // DELETE /api/habits/:id
-// Delete a habit owned by the authenticated user.
 // --------------------------------------------------
 
 router.delete("/:id", protect, async (req, res) => {
@@ -872,7 +923,9 @@ router.delete("/:id", protect, async (req, res) => {
     return res.status(200).json({
       success: true,
       message: "Habit deleted successfully.",
-      data: { id: habit._id },
+      data: {
+        id: habit._id,
+      },
     });
   } catch (error) {
     return sendServerError(res, "Failed to delete habit.", error);
@@ -881,8 +934,7 @@ router.delete("/:id", protect, async (req, res) => {
 
 // --------------------------------------------------
 // GET /api/habits/:id
-// Get a single habit owned by the authenticated user.
-// Keep this route after the named routes above.
+// Keep after named routes.
 // --------------------------------------------------
 
 router.get("/:id", protect, async (req, res) => {
