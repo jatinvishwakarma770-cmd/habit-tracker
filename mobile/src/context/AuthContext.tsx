@@ -1,3 +1,4 @@
+
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import {
@@ -34,74 +35,68 @@ type AuthContextType = {
 };
 
 const AuthContext =
-  createContext<AuthContextType | undefined>(
-    undefined
-  );
+  createContext<AuthContextType | undefined>(undefined);
 
 const TOKEN_KEY = '@habit_tracker_token';
 const USER_KEY = '@habit_tracker_user';
 
-// Physical Android phone
-const API_URL = 'http://192.168.1.66:5000';
+// Local backend for development on your physical Android phone.
+const API_URL = 'https://habit-tracker-n3gw.onrender.com';
 
 export function AuthProvider({
   children,
 }: {
   children: ReactNode;
 }) {
-  const [user, setUser] =
-    useState<User | null>(null);
-
-  const [token, setToken] =
-    useState<string | null>(null);
-
-  const [loading, setLoading] =
-    useState(true);
+  const [user, setUser] = useState<User | null>(null);
+  const [token, setToken] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   // =====================================================
   // LOAD SAVED LOGIN
   // =====================================================
 
   useEffect(() => {
-  const loadAuth = async () => {
-    try {
-      console.log('Checking saved login...');
+    let mounted = true;
 
-      const savedToken =
-        await AsyncStorage.getItem(TOKEN_KEY);
+    const loadAuth = async () => {
+      try {
+        const savedToken = await AsyncStorage.getItem(TOKEN_KEY);
+        const savedUser = await AsyncStorage.getItem(USER_KEY);
 
-      const savedUser =
-        await AsyncStorage.getItem(USER_KEY);
+        if (savedToken && savedUser) {
+          const parsedUser = JSON.parse(savedUser) as User;
 
-      console.log('SAVED TOKEN:', savedToken);
-      console.log('SAVED USER:', savedUser);
+          if (mounted) {
+            setToken(savedToken);
+            setUser(parsedUser);
+          }
+        }
+      } catch (error) {
+        console.error('LOAD AUTH ERROR:', error);
 
-      if (savedToken && savedUser) {
-        setToken(savedToken);
-        setUser(JSON.parse(savedUser));
+        await AsyncStorage.multiRemove([
+          TOKEN_KEY,
+          USER_KEY,
+        ]);
 
-        console.log('✅ Saved user found');
-      } else {
-        console.log('❌ No saved login found');
+        if (mounted) {
+          setToken(null);
+          setUser(null);
+        }
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
       }
+    };
 
-    } catch (error) {
-      console.log('LOAD AUTH ERROR:', error);
+    loadAuth();
 
-      // If stored data is corrupted, clear it
-      await AsyncStorage.removeItem(TOKEN_KEY);
-      await AsyncStorage.removeItem(USER_KEY);
-
-      setToken(null);
-      setUser(null);
-
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  loadAuth();
-}, []);
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   // =====================================================
   // REGISTER
@@ -111,44 +106,28 @@ export function AuthProvider({
     name: string,
     email: string,
     password: string
-  ) => {
+  ): Promise<void> => {
     try {
-      console.log(
-        'REGISTER REQUEST STARTED'
-      );
-
       const response = await fetch(
         `${API_URL}/api/auth/register`,
         {
           method: 'POST',
-
           headers: {
-            'Content-Type':
-              'application/json',
+            'Content-Type': 'application/json',
           },
-
           body: JSON.stringify({
             name: name.trim(),
-            email: email
-              .trim()
-              .toLowerCase(),
+            email: email.trim().toLowerCase(),
             password,
           }),
         }
       );
 
-      const data =
-        await response.json();
-
-      console.log(
-        'REGISTER RESPONSE:',
-        data
-      );
+      const data = await response.json();
 
       if (!response.ok) {
         throw new Error(
-          data?.message ||
-            'Registration failed'
+          data?.message || 'Registration failed'
         );
       }
 
@@ -158,38 +137,18 @@ export function AuthProvider({
         );
       }
 
-      // Save token
-      await AsyncStorage.setItem(
-        TOKEN_KEY,
-        data.token
-      );
-
-      // Save user
+      await AsyncStorage.setItem(TOKEN_KEY, data.token);
       await AsyncStorage.setItem(
         USER_KEY,
         JSON.stringify(data.user)
       );
 
-      // Update state
       setToken(data.token);
       setUser(data.user);
-
-      console.log(
-        'REGISTRATION SUCCESSFUL'
-      );
     } catch (error: any) {
-      console.log(
-        'REGISTER ERROR:',
-        error
-      );
-
-      if (
-        error?.message?.includes(
-          'Network request failed'
-        )
-      ) {
+      if (error?.message?.includes('Network request failed')) {
         throw new Error(
-          'Cannot connect to server. Make sure your phone and PC are on the same Wi-Fi.'
+          'Cannot connect to the local server. Check your Wi-Fi and backend.'
         );
       }
 
@@ -204,44 +163,26 @@ export function AuthProvider({
   const login = async (
     email: string,
     password: string
-  ) => {
+  ): Promise<void> => {
     try {
-      console.log(
-        'LOGIN REQUEST STARTED'
-      );
-
       const response = await fetch(
         `${API_URL}/api/auth/login`,
         {
           method: 'POST',
-
           headers: {
-            'Content-Type':
-              'application/json',
+            'Content-Type': 'application/json',
           },
-
           body: JSON.stringify({
-            email: email
-              .trim()
-              .toLowerCase(),
+            email: email.trim().toLowerCase(),
             password,
           }),
         }
       );
 
-      const data =
-        await response.json();
-
-      console.log(
-        'LOGIN RESPONSE:',
-        data
-      );
+      const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(
-          data?.message ||
-            'Login failed'
-        );
+        throw new Error(data?.message || 'Login failed');
       }
 
       if (!data.token || !data.user) {
@@ -250,38 +191,18 @@ export function AuthProvider({
         );
       }
 
-      // Save token
-      await AsyncStorage.setItem(
-        TOKEN_KEY,
-        data.token
-      );
-
-      // Save user
+      await AsyncStorage.setItem(TOKEN_KEY, data.token);
       await AsyncStorage.setItem(
         USER_KEY,
         JSON.stringify(data.user)
       );
 
-      // Update state
       setToken(data.token);
       setUser(data.user);
-
-      console.log(
-        'LOGIN SUCCESSFUL'
-      );
     } catch (error: any) {
-      console.log(
-        'LOGIN ERROR:',
-        error
-      );
-
-      if (
-        error?.message?.includes(
-          'Network request failed'
-        )
-      ) {
+      if (error?.message?.includes('Network request failed')) {
         throw new Error(
-          'Cannot connect to server. Make sure your phone and PC are on the same Wi-Fi.'
+          'Cannot connect to the local server. Check your Wi-Fi and backend.'
         );
       }
 
@@ -293,31 +214,18 @@ export function AuthProvider({
   // LOGOUT
   // =====================================================
 
-  const logout = async () => {
+  const logout = async (): Promise<void> => {
     try {
-      console.log(
-        'LOGGING OUT...'
-      );
-
-      await AsyncStorage.removeItem(
-        TOKEN_KEY
-      );
-
-      await AsyncStorage.removeItem(
-        USER_KEY
-      );
+      await AsyncStorage.multiRemove([
+        TOKEN_KEY,
+        USER_KEY,
+      ]);
 
       setToken(null);
       setUser(null);
-
-      console.log(
-        'LOGOUT SUCCESSFUL'
-      );
     } catch (error) {
-      console.log(
-        'LOGOUT ERROR:',
-        error
-      );
+      console.error('LOGOUT ERROR:', error);
+      throw error;
     }
   };
 
@@ -346,8 +254,7 @@ export function AuthProvider({
 // =====================================================
 
 export function useAuth() {
-  const context =
-    useContext(AuthContext);
+  const context = useContext(AuthContext);
 
   if (!context) {
     throw new Error(

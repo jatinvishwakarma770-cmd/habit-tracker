@@ -6,7 +6,10 @@ import { Colors } from '@/constants/theme';
 
 export default function AppTabs() {
   const scheme = useColorScheme();
-  const colors = Colors[scheme === 'unspecified' ? 'light' : scheme];
+
+  // Handle null safely and default to light mode.
+  const theme = scheme === 'dark' ? 'dark' : 'light';
+  const colors = Colors[theme];
 
   return (
     <NativeTabs
@@ -56,4 +59,3 @@ export default function AppTabs() {
     </NativeTabs>
   );
 }
-

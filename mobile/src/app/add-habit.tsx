@@ -1,5 +1,5 @@
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   StyleSheet,
@@ -22,6 +22,10 @@ import { useHabits } from "@/context/HabitContext";
 
 import {
   scheduleHabitReminder,
+  getNotificationSound,
+  setNotificationSound,
+  NOTIFICATION_SOUNDS,
+  type NotificationSoundId,
 } from "@/utils/notifications";
 
 // =====================================================
@@ -42,6 +46,57 @@ type Frequency =
   | "Weekends"
   | "Custom";
 
+
+type HabitPreset = {
+  name: string;
+  description: string;
+  icon: string;
+};
+
+const PREDEFINED_HABITS: Record<Category, HabitPreset[]> = {
+  Health: [
+    { name: "Drink 2L Water", description: "Drink enough water throughout the day.", icon: "💧" },
+    { name: "Sleep 8 Hours", description: "Maintain a consistent sleep routine.", icon: "🌙" },
+    { name: "Eat Healthy", description: "Choose balanced and nutritious meals.", icon: "🥗" },
+    { name: "Meditate", description: "Take a few minutes to relax and focus.", icon: "🧘" },
+    { name: "Morning Walk", description: "Start the day with a refreshing walk.", icon: "🌅" },
+  ],
+  Fitness: [
+    { name: "Exercise 30 Minutes", description: "Move your body with a daily workout.", icon: "🏋️" },
+    { name: "Walk 10,000 Steps", description: "Build an active routine through walking.", icon: "👟" },
+    { name: "Do 20 Push-ups", description: "Practice push-ups at a suitable pace.", icon: "💪" },
+    { name: "Stretch 10 Minutes", description: "Improve mobility with gentle stretching.", icon: "🤸" },
+    { name: "Go for a Run", description: "Go for a run or an easy jog.", icon: "🏃" },
+  ],
+  Study: [
+    { name: "Study 2 Hours", description: "Set aside focused time for learning.", icon: "📚" },
+    { name: "Read 10 Pages", description: "Read a book or study material daily.", icon: "📖" },
+    { name: "Practice DSA", description: "Solve a data structures and algorithms problem.", icon: "💻" },
+    { name: "Learn Something New", description: "Spend time learning a new concept or skill.", icon: "🧠" },
+    { name: "Revise Notes", description: "Review notes to strengthen your understanding.", icon: "📝" },
+  ],
+  Work: [
+    { name: "Plan My Day", description: "Choose the most important tasks for today.", icon: "📅" },
+    { name: "Complete Top Priority", description: "Finish the most important task first.", icon: "🎯" },
+    { name: "Avoid Distractions", description: "Work in a focused, distraction-free session.", icon: "🔕" },
+    { name: "Learn a Job Skill", description: "Practice a skill that supports your career.", icon: "🚀" },
+    { name: "Review Progress", description: "Review what went well and what needs attention.", icon: "📈" },
+  ],
+  Personal: [
+    { name: "Journal 10 Minutes", description: "Write down thoughts, plans, or reflections.", icon: "📓" },
+    { name: "Practice Gratitude", description: "Write or think about things you appreciate.", icon: "🙏" },
+    { name: "Limit Social Media", description: "Set a healthy limit for social media use.", icon: "📵" },
+    { name: "Call Family", description: "Make time to connect with family.", icon: "❤️" },
+    { name: "Read for Pleasure", description: "Read something you enjoy.", icon: "📘" },
+  ],
+  Other: [
+    { name: "Save Money", description: "Set aside a small amount or track spending.", icon: "💰" },
+    { name: "Learn a Language", description: "Practice vocabulary or speaking each day.", icon: "🌍" },
+    { name: "Practice a Hobby", description: "Spend time on an activity you enjoy.", icon: "🎨" },
+    { name: "Clean My Space", description: "Tidy one small area of your space.", icon: "🧹" },
+  ],
+};
+
 // =====================================================
 // SCREEN
 // =====================================================
@@ -59,6 +114,10 @@ export default function AddHabitScreen() {
 
   const [description, setDescription] = useState("");
 
+  // The selected preset can be edited before saving.
+  // "__custom__" means the user wants to create their own habit.
+  const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
+
   // ===================================================
   // CATEGORY
   // ===================================================
@@ -74,6 +133,23 @@ export default function AddHabitScreen() {
     "Personal",
     "Other",
   ];
+
+  const chooseCategory = (item: Category) => {
+    setCategory(item);
+    setSelectedPreset(null);
+  };
+
+  const choosePreset = (preset: HabitPreset) => {
+    setSelectedPreset(preset.name);
+    setHabitName(preset.name);
+    setDescription(preset.description);
+  };
+
+  const chooseCustomHabit = () => {
+    setSelectedPreset("__custom__");
+    setHabitName("");
+    setDescription("");
+  };
 
   // ===================================================
   // FREQUENCY
@@ -139,6 +215,43 @@ export default function AddHabitScreen() {
 
   const [showTimePicker, setShowTimePicker] =
     useState(false);
+
+  // Notification sound preference for this and future habit reminders.
+  const [selectedSound, setSelectedSound] =
+    useState<NotificationSoundId>("soft-chime");
+
+  const [savingSound, setSavingSound] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+
+    getNotificationSound().then((sound) => {
+      if (active) setSelectedSound(sound);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const chooseNotificationSound = async (soundId: NotificationSoundId) => {
+    if (savingSound || soundId === selectedSound) return;
+
+    setSavingSound(true);
+    try {
+      const saved = await setNotificationSound(soundId);
+      if (saved) {
+        setSelectedSound(soundId);
+      } else {
+        Alert.alert(
+          "Sound not saved",
+          "We couldn't save this notification sound. Please try again."
+        );
+      }
+    } finally {
+      setSavingSound(false);
+    }
+  };
 
   // ===================================================
   // SAVING
@@ -521,9 +634,12 @@ export default function AddHabitScreen() {
             placeholder="e.g. Drink 2L water"
             placeholderTextColor="#666D67"
             value={habitName}
-            onChangeText={
-              setHabitName
-            }
+            onChangeText={(value) => {
+              setHabitName(value);
+              if (selectedPreset !== "__custom__") {
+                setSelectedPreset(null);
+              }
+            }}
             autoFocus
             maxLength={50}
             returnKeyType="next"
@@ -548,9 +664,12 @@ export default function AddHabitScreen() {
             placeholder="Why do you want to build this habit?"
             placeholderTextColor="#666D67"
             value={description}
-            onChangeText={
-              setDescription
-            }
+            onChangeText={(value) => {
+              setDescription(value);
+              if (selectedPreset !== "__custom__") {
+                setSelectedPreset(null);
+              }
+            }}
             multiline
             maxLength={200}
             textAlignVertical="top"
@@ -578,9 +697,7 @@ export default function AddHabitScreen() {
                       category === item &&
                         styles.categoryButtonSelected,
                     ]}
-                    onPress={() =>
-                      setCategory(item)
-                    }
+                    onPress={() => chooseCategory(item)}
                   >
                     <Text
                       style={[
@@ -595,6 +712,86 @@ export default function AddHabitScreen() {
                   </Pressable>
                 )
               )}
+            </View>
+          </View>
+
+          {/* PREDEFINED HABITS */}
+
+          <View style={styles.section}>
+            <Text style={styles.label}>
+              QUICK-SELECT HABITS · {category.toUpperCase()}
+            </Text>
+
+            <Text style={styles.presetHelper}>
+              Tap a suggestion to fill in the form, or choose Custom Habit.
+              You can edit the name and description before saving.
+            </Text>
+
+            <View style={styles.presetGrid}>
+              {PREDEFINED_HABITS[category].map((preset) => {
+                const selected = selectedPreset === preset.name;
+
+                return (
+                  <Pressable
+                    key={preset.name}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    style={[
+                      styles.presetCard,
+                      selected && styles.presetCardSelected,
+                    ]}
+                    onPress={() => choosePreset(preset)}
+                  >
+                    <View style={styles.presetCardTop}>
+                      <Text style={styles.presetIcon}>{preset.icon}</Text>
+                      {selected && (
+                        <Text style={styles.presetCheck}>✓</Text>
+                      )}
+                    </View>
+
+                    <Text
+                      style={[
+                        styles.presetName,
+                        selected && styles.presetNameSelected,
+                      ]}
+                    >
+                      {preset.name}
+                    </Text>
+                    <Text style={styles.presetDescription}>
+                      {preset.description}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ selected: selectedPreset === "__custom__" }}
+                style={[
+                  styles.presetCard,
+                  styles.customPresetCard,
+                  selectedPreset === "__custom__" && styles.presetCardSelected,
+                ]}
+                onPress={chooseCustomHabit}
+              >
+                <View style={styles.presetCardTop}>
+                  <Text style={styles.presetIcon}>＋</Text>
+                  {selectedPreset === "__custom__" && (
+                    <Text style={styles.presetCheck}>✓</Text>
+                  )}
+                </View>
+                <Text
+                  style={[
+                    styles.presetName,
+                    selectedPreset === "__custom__" && styles.presetNameSelected,
+                  ]}
+                >
+                  Custom Habit
+                </Text>
+                <Text style={styles.presetDescription}>
+                  Create your own habit from scratch.
+                </Text>
+              </Pressable>
             </View>
           </View>
 
@@ -881,6 +1078,44 @@ export default function AddHabitScreen() {
                   🔔 Your phone will notify you
                   at this time every day.
                 </Text>
+
+                {/* NOTIFICATION SOUND SELECTOR */}
+                <View style={styles.soundSection}>
+                  <Text style={styles.timeLabel}>NOTIFICATION SOUND</Text>
+                  <Text style={styles.soundHelper}>Choose the sound for your habit reminders.</Text>
+
+                  <View style={styles.soundOptions}>
+                    {NOTIFICATION_SOUNDS.map((sound) => {
+                      const selected = selectedSound === sound.id;
+
+                      return (
+                        <Pressable
+                          key={sound.id}
+                          accessibilityRole="radio"
+                          accessibilityState={{ selected }}
+                          disabled={savingSound}
+                          style={[
+                            styles.soundOption,
+                            selected && styles.soundOptionSelected,
+                            savingSound && styles.soundOptionDisabled,
+                          ]}
+                          onPress={() => chooseNotificationSound(sound.id)}
+                        >
+                          <View style={styles.soundOptionTextContainer}>
+                            <Text style={[styles.soundName, selected && styles.soundNameSelected]}>
+                              {sound.id === "soft-chime" ? "♪" : sound.id === "classic-bell" ? "♬" : sound.id === "morning-wakeup" ? "☀" : sound.id === "nature-tone" ? "❋" : "◖"}  {sound.name}
+                            </Text>
+                            <Text style={styles.soundDescription}>{sound.description}</Text>
+                          </View>
+                          <View style={[styles.soundRadio, selected && styles.soundRadioSelected]}>
+                            {selected && <View style={styles.soundRadioDot} />}
+                          </View>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                  <Text style={styles.soundFootnote}>Your selection is saved and will be used for newly scheduled reminders.</Text>
+                </View>
               </View>
             )}
           </View>
@@ -1220,6 +1455,79 @@ const styles = StyleSheet.create({
     color: "#D7E2D4",
   },
 
+  // PREDEFINED HABITS
+
+  presetHelper: {
+    color: "#687169",
+    fontSize: 11,
+    lineHeight: 17,
+    marginTop: -2,
+    marginBottom: 12,
+  },
+
+  presetGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 9,
+  },
+
+  presetCard: {
+    width: "48%",
+    minHeight: 142,
+    padding: 12,
+    borderRadius: 14,
+    backgroundColor: "#101411",
+    borderWidth: 1,
+    borderColor: "#303731",
+  },
+
+  presetCardSelected: {
+    backgroundColor: "#202B22",
+    borderColor: "#8EA58A",
+    borderWidth: 1.5,
+  },
+
+  customPresetCard: {
+    borderStyle: "dashed",
+  },
+
+  presetCardTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+
+  presetIcon: {
+    color: "#D7E2D4",
+    fontSize: 22,
+    fontWeight: "700",
+  },
+
+  presetCheck: {
+    color: "#D7E2D4",
+    fontSize: 16,
+    fontWeight: "900",
+  },
+
+  presetName: {
+    color: "#C6CEC5",
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: "800",
+  },
+
+  presetNameSelected: {
+    color: "#D7E2D4",
+  },
+
+  presetDescription: {
+    color: "#737B74",
+    fontSize: 10,
+    lineHeight: 15,
+    marginTop: 5,
+  },
+
   // FREQUENCY
 
   frequencyContainer: {
@@ -1408,6 +1716,99 @@ const styles = StyleSheet.create({
     color: "#687169",
     fontSize: 10,
     lineHeight: 16,
+    marginTop: 9,
+  },
+
+  // NOTIFICATION SOUND SELECTOR
+
+  soundSection: {
+    marginTop: 20,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: "#292F2A",
+  },
+
+  soundHelper: {
+    color: "#687169",
+    fontSize: 10,
+    lineHeight: 15,
+    marginTop: -3,
+    marginBottom: 10,
+  },
+
+  soundOptions: {
+    gap: 8,
+  },
+
+  soundOption: {
+    minHeight: 58,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: "#171D18",
+    borderWidth: 1,
+    borderColor: "#303731",
+  },
+
+  soundOptionSelected: {
+    backgroundColor: "#202B22",
+    borderColor: "#8EA58A",
+  },
+
+  soundOptionDisabled: {
+    opacity: 0.7,
+  },
+
+  soundOptionTextContainer: {
+    flex: 1,
+    paddingRight: 12,
+  },
+
+  soundName: {
+    color: "#C6CEC5",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+
+  soundNameSelected: {
+    color: "#D7E2D4",
+  },
+
+  soundDescription: {
+    color: "#737B74",
+    fontSize: 10,
+    lineHeight: 14,
+    marginTop: 3,
+  },
+
+  soundRadio: {
+    width: 19,
+    height: 19,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: "#687169",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  soundRadioSelected: {
+    borderColor: "#9CAF99",
+  },
+
+  soundRadioDot: {
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    backgroundColor: "#D7E2D4",
+  },
+
+  soundFootnote: {
+    color: "#59615B",
+    fontSize: 9,
+    lineHeight: 14,
     marginTop: 9,
   },
 
